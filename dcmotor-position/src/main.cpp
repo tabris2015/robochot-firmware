@@ -5,15 +5,23 @@
 #include "mbed.h"
 #include <ros.h>
 #include <std_msgs/Empty.h>
+#include <std_msgs/Float32.h>
+#include <std_msgs/UInt16.h>
 
+// hardware
+// DigitalOut myled(LED1);
+PwmOut led(LED1);
+
+// ros stuff
 ros::NodeHandle nh;
-DigitalOut myled(LED1);
 
-void messageCb(const std_msgs::Empty& toggle_msg){
-    myled = !myled;   // blink the led
+
+
+void messageCb(const std_msgs::UInt16& brightness_msg){
+    led = brightness_msg.data / 360.0;
 }
 
-ros::Subscriber<std_msgs::Empty> sub("toggle_led", &messageCb);
+ros::Subscriber<std_msgs::UInt16> sub("led_brightness", &messageCb);
 
 int main() {
     nh.initNode();
