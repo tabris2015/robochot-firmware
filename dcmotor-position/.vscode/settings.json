@@ -1,0 +1,13 @@
+{
+    "files.associations": {
+        "deque": "cpp",
+        "string": "cpp",
+        "vector": "cpp",
+        "mstd_iterator": "cpp",
+        "array": "cpp",
+        "initializer_list": "cpp",
+        "mstd_utility": "cpp",
+        "string_view": "cpp",
+        "utility": "cpp"
+    }
+}
