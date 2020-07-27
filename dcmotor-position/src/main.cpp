@@ -5,45 +5,102 @@
 #include "mbed.h"
 #include "Motor.h"
 #include "QEI.h"
+#include "PID.h"
 #include <ros.h>
 #include <std_msgs/Empty.h>
 #include <std_msgs/Float32.h>
 #include <std_msgs/UInt16.h>
 #include <std_msgs/Int32.h>
 #include <std_msgs/Float32MultiArray.h>
+#include <geometry_msgs/Vector3.h>      // for pid tunings
 
-#define DATA_LEN 3
-#define MOTOR_PPR 1496
+#include "config.h"
 
-#ifdef F303K8
-    #define PWM_PIN PA_8
-    #define IN1_PIN PA_11
-    #define IN2_PIN PB_5
-    #define ENCA_PIN PF_0
-    #define ENCB_PIN PF_1
-#else
-    #define PWM_PIN PC_9
-    #define IN1_PIN PB_8
-    #define IN2_PIN PB_9
-    #define ENCA_PIN PC_8
-    #define ENCB_PIN PC_6
-#endif
+#define PUB_RATE 0.1
+#define PID_RATE 0.01
 
 // hardware
 // DigitalOut myled(LED1);
-PwmOut led(LED1);
+PwmOut led(LED_PIN);
 // motor
-int setpoint = 0;
+float setpoint = 0;
+float angle = 0;
+float kp = 1;
+float ki = 0;
+float kd = 0;
 Motor m1(PWM_PIN, IN1_PIN, IN2_PIN);
 // encoder
 QEI enc1(ENCA_PIN, ENCB_PIN, NC, MOTOR_PPR, QEI::X4_ENCODING);
+// pid
+PID pid(kp, ki, kd, PID_RATE);
+// useful resources and timing
+Timer t;
+Ticker pub_ticker;
+Ticker pid_ticker;
+
 // ros stuff
 ros::NodeHandle nh;
 std_msgs::Int32 pulses_msg;
-std_msgs::Float32MultiArray monitoring_msg;
+// std_msgs::Float32MultiArray monitoring_msg;
+geometry_msgs::Vector3 monitoring_msg;
+// prototypes
+void messageCb(const std_msgs::UInt16 &brightness_msg);
+void speedCb(const std_msgs::Float32 &speed_msg);
+void setpointCb(const std_msgs::Float32 &setpoint_msg);
+void pidTuningsCb(const geometry_msgs::Vector3 &pid_tunings_msg);
+void pubCb(void);
+void pidCb(void);
+void initPid();
+// -----------------------------------------------
 
-int monitor_data[3];
+ros::Subscriber<std_msgs::UInt16> led_sub("led_brightness", &messageCb);
+ros::Subscriber<std_msgs::Float32> speed_sub("motor_speed", &speedCb);
+ros::Subscriber<std_msgs::Float32> setpoint_sub("setpoint", &setpointCb);
+ros::Subscriber<geometry_msgs::Vector3> pid_tunings_sub("pid_tunings", &pidTuningsCb);
 
+ros::Publisher pulses_pub("motor_pulses", &pulses_msg);
+ros::Publisher monitoring_pub("monitoring", &monitoring_msg);
+
+int main()
+{
+    // init hardware
+    m1.period(0.00005);
+    enc1.reset();
+    // ros stuff
+    nh.initNode();
+    nh.advertise(monitoring_pub);
+    nh.subscribe(led_sub);
+    nh.subscribe(setpoint_sub);
+    nh.subscribe(pid_tunings_sub);
+
+    // monitoring_msg.data_length = DATA_LEN;
+    // monitoring_msg.data = (float *)malloc(sizeof(float)*DATA_LEN);
+
+    // monitoring_msg.data[0] = (float)setpoint;
+    monitoring_msg.x = setpoint;
+
+    // monitoring_msg.data[2] = 0;     //? used for controller effort
+    
+    //setup
+    pub_ticker.attach(pubCb, PUB_RATE);
+    pid_ticker.attach(pidCb, PID_RATE);
+    initPid();
+    pid.setSetPoint(setpoint);
+    while (1)
+    {
+        nh.spinOnce();
+    }
+}
+
+// functions and callbacks
+
+void initPid()
+{
+    pid.setInputLimits(-360.0, 360.0);
+    pid.setOutputLimits(-1.0, 1.0);
+    pid.setBias(0.0);
+    pid.setMode(AUTO_MODE);
+}
 
 void messageCb(const std_msgs::UInt16 &brightness_msg)
 {
@@ -55,52 +112,32 @@ void speedCb(const std_msgs::Float32 &speed_msg)
     m1.speed(speed_msg.data);
 }
 
-void setpointCb(const std_msgs::Int32 &setpoint_msg)
+void setpointCb(const std_msgs::Float32 &setpoint_msg)
 {
     setpoint = setpoint_msg.data;
-    monitor_data[0] = setpoint;
+    monitoring_msg.x = setpoint;
+    pid.setSetPoint(setpoint);
 }
-ros::Subscriber<std_msgs::UInt16> led_sub("led_brightness", &messageCb);
-ros::Subscriber<std_msgs::Float32> speed_sub("motor_speed", &speedCb);
-ros::Subscriber<std_msgs::Int32> setpoint_sub("setpoint", &setpointCb);
-
-ros::Publisher pulses_pub("motor_pulses", &pulses_msg);
-ros::Publisher monitoring_pub("monitoring", &monitoring_msg);
-
-// useful resources and timing
-Timer t;
-
-int main()
+void pidTuningsCb(const geometry_msgs::Vector3 &pid_tunings_msg)
 {
-    // init hardware
-    m1.period(0.00005);
-    enc1.reset();
-    nh.initNode();
-    // ros stuff
-    nh.subscribe(led_sub);
-    nh.subscribe(speed_sub);
-    nh.advertise(monitoring_pub);
+    kp = pid_tunings_msg.x;
+    ki = pid_tunings_msg.y;
+    kd = pid_tunings_msg.z;
+    pid.setTunings(kp, ki, kd);
+}
+void pubCb()
+{
+    // publish mesages
+    // [setpoint, position, effort]
+    monitoring_msg.y = angle;
+    monitoring_pub.publish(&monitoring_msg);
+}
 
-    monitoring_msg.layout.dim = (std_msgs::MultiArrayDimension *)malloc(sizeof(std_msgs::MultiArrayDimension) * 2);
-    monitoring_msg.layout.dim[0].label = "motor";
-    monitoring_msg.layout.dim[0].size = 3;
-    monitoring_msg.layout.dim[0].stride = 1*3;
-    monitoring_msg.layout.data_offset = 0;
-    monitoring_msg.data = (std_msgs::Float32MultiArray::_data_type*)malloc(DATA_LEN * sizeof(std_msgs::Float32MultiArray::_data_type));
-    
-    monitoring_msg.data[0] = (float)setpoint;
-    monitoring_msg.data[2] = 0;     //? used for controller effort
-    
-    //timing
-    t.start();
-    while (1)
-    {
-        if(t.read_ms() >= 100)
-        {
-            t.reset();
-            monitoring_msg.data[1] = (float)enc1.getPulses();
-            monitoring_pub.publish(&monitoring_msg);
-        }
-        nh.spinOnce();
-    }
+void pidCb()
+{
+    angle = ((float)enc1.getPulses() / MOTOR_PPR) * 360;
+    pid.setProcessValue(angle);
+    float out = pid.compute();
+    m1.speed(out);
+    monitoring_msg.z = out * 100;
 }
