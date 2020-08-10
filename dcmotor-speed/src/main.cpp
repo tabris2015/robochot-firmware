@@ -97,7 +97,7 @@ int main()
 
 void initPid()
 {
-    pid.setInputLimits(-10.0, 10.0);
+    pid.setInputLimits(-5.3, 5.3);
     pid.setOutputLimits(-1.0, 1.0);
     pid.setBias(0.0);
     pid.setMode(AUTO_MODE);
