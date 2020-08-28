@@ -3,12 +3,17 @@
  * Blinks an LED on callback
  */
 #include "mbed.h"
+#include "rtos/rtos.h"
+#include "BNO055.h"
 #include <ros.h>
 #include <std_msgs/Float32.h>
 #include <std_msgs/UInt16.h>
 #include <geometry_msgs/Vector3.h>      // for pid tunings
+#include <geometry_msgs/Twist.h>
 #include <sensor_msgs/JointState.h>     // for feedback
+#include <sensor_msgs/Imu.h>
 #include "robot_drive.h"
+
 
 #define PUB_RATE 0.1
 #define PID_RATE 0.01
@@ -17,17 +22,20 @@
 PwmOut led(LED_PIN);
 
 // hardware
-Robot robot(1, 0, 0, PID_RATE);
+// BNO055 imu(PB_3, PB_10);        // I2C2
+Robot robot(1, 0, 0, PID_RATE, &led);
 
 // useful resources and timing
 Timer t;
 Ticker pub_ticker;
+
 
 // ros stuff
 ros::NodeHandle nh;
 char * robot_id = "/robochot";
 // ros messages
 sensor_msgs::JointState robot_state_msg;
+sensor_msgs::Imu imu_msg;
 
 char *names[] = {"L", "R"};
 double pos[2];
@@ -37,6 +45,7 @@ double eff[2];
 void messageCb(const std_msgs::UInt16 &brightness_msg);
 void wheelsCb(const geometry_msgs::Vector3 &wheels_msg);
 void pidTuningsCb(const geometry_msgs::Vector3 &pid_tunings_msg);
+void twistCb(const geometry_msgs::Twist &twist_msg);
 void pubCb(void);
 // -----------------------------------------------
 
@@ -45,16 +54,26 @@ ros::Subscriber<geometry_msgs::Vector3> wheels_sub("wheels", &wheelsCb);
 ros::Subscriber<geometry_msgs::Vector3> pid_tunings_sub("pid_tunings", &pidTuningsCb);
 
 ros::Publisher robot_state_pub("robot_state", &robot_state_msg);
+ros::Publisher imu_pub("robot_imu", &imu_msg);
 
 int main()
 {
-    
+    // robot hardware
+    // imu.reset();
+    // if (!imu.check())
+    //     while (true) {
+    //         led = !led;
+    //         ThisThread::sleep_for(100);
+    //     }
+    // imu.setmode(OPERATION_MODE_NDOF);   // fusion mode
     // ros stuff
+    robot.start();
     nh.initNode();
-    nh.subscribe(led_sub);
+    // nh.subscribe(led_sub);
     nh.subscribe(pid_tunings_sub);
     nh.subscribe(wheels_sub);
     nh.advertise(robot_state_pub);
+    // nh.advertise(imu_pub);
     
     robot_state_msg.header.frame_id = robot_id;
     robot_state_msg.name_length = 2;
@@ -64,6 +83,7 @@ int main()
     robot_state_msg.name = names;
     //setup
     pub_ticker.attach(pubCb, PUB_RATE);
+    
     while (1)
     {
         nh.spinOnce();
@@ -100,4 +120,15 @@ void pubCb()
 void wheelsCb(const geometry_msgs::Vector3 &wheels_msg)
 {
     robot.setWheels(wheels_msg.x, wheels_msg.y);
+}
+
+void twistCb(const geometry_msgs::Twist &twist_msg)
+{
+    // compute velocities
+    //                  m/s                 rad/s               m                           m
+    float l_vel = (twist_msg.linear.x - twist_msg.angular.z * WHEEL_SEPARATION / 2.0) / WHEEL_RADIUS;
+    float r_vel = (twist_msg.linear.x + twist_msg.angular.z * WHEEL_SEPARATION / 2.0) / WHEEL_RADIUS;
+
+    // write velocities
+    robot.setWheels(l_vel, r_vel);
 }

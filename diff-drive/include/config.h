@@ -2,8 +2,13 @@
 #define CONFIG_H
 
 #define DATA_LEN 3
-#define MOTOR_PPR 10640//1496
 
+// robot defines
+#define MOTOR_PPR 10640//1496
+#define WHEEL_RADIUS 0.04
+#define WHEEL_SEPARATION 0.16
+
+// board defines
 #ifdef F303K8
     #define LED_PIN PB_4
     #define PWM_PIN PA_8
@@ -25,4 +30,5 @@
     #define R_ENCB_PIN PB_12
 
 #endif
+
 #endif

@@ -2,6 +2,8 @@
 #define ROBOT_DRIVE_H
 
 #include "mbed.h"
+#include "rtos.h"
+#include "rtos/Thread.h"
 #include "Motor.h"
 #include "QEI.h"
 #include "PID.h"
@@ -41,13 +43,16 @@ private:
     PID l_pid_;
     PID r_pid_;
     Ticker pid_ticker_;
-
+    Thread control_th_;
+    PwmOut * led_ptr_;
     // robot 
     RobotState state_;
 
     void updatePid();
+    void controlLoop();
 public:
-    Robot(float kp, float kd, float ki, float pid_rate);
+    Robot(float kp, float kd, float ki, float pid_rate, PwmOut * led_ptr);
+    void start();
     void setWheels(float left_speed, float right_speed);
     RobotState readState();
     void setPidTunings(float kp, float kd, float ki);
