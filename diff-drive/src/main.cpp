@@ -165,11 +165,5 @@ void wheelsCb(const geometry_msgs::Vector3 &wheels_msg)
 
 void twistCb(const geometry_msgs::Twist &twist_msg)
 {
-    // compute velocities
-    //                  m/s                 rad/s               m                           m
-    float l_vel = (twist_msg.linear.x - twist_msg.angular.z * WHEEL_SEPARATION / 2.0) / WHEEL_RADIUS;
-    float r_vel = (twist_msg.linear.x + twist_msg.angular.z * WHEEL_SEPARATION / 2.0) / WHEEL_RADIUS;
-
-    // write velocities
-    robot.setWheels(l_vel, r_vel);
+    robot.setUnicycle(twist_msg.linear.x, twist_msg.angular.z);
 }
