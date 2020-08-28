@@ -1,15 +1,16 @@
 #include "robot_drive.h"
 
 Robot::Robot(float kp, float kd, float ki,float pid_rate, PwmOut * led_ptr):
-kp_(kp), kd_(kd), ki_(ki), pid_rate_(pid_rate),
+kp_(kp), kd_(kd), ki_(ki), pid_rate_(pid_rate), sample_time_((uint32_t)(pid_rate_ * 1000.0)),
 l_motor_(L_PWM_PIN, L_IN1_PIN, L_IN2_PIN),
 r_motor_(R_PWM_PIN, R_IN1_PIN, R_IN2_PIN),
 l_encoder_(L_ENCA_PIN, L_ENCB_PIN, NC, MOTOR_PPR, QEI::X4_ENCODING),
 r_encoder_(R_ENCA_PIN, R_ENCB_PIN, NC, MOTOR_PPR, QEI::X4_ENCODING),
 l_pid_(kp_, kd_, ki_, pid_rate_),
 r_pid_(kp_, kd_, ki_, pid_rate_),
-control_th_(osPriorityAboveNormal, 1024),
-led_ptr_(led_ptr)
+control_th_(osPriorityAboveNormal),
+led_ptr_(led_ptr),
+odom_({0.0, 0.0, 0.0, 0.0, 0.0})
 {
     // init robot
     l_motor_.period(PWM_PERIOD);
@@ -28,7 +29,6 @@ led_ptr_(led_ptr)
     r_pid_.setBias(0.0);
     l_pid_.setSetPoint(0.0);
     r_pid_.setSetPoint(0.0);
-    // pid_ticker_.attach(callback(this, &Robot::updatePid), pid_rate_);
 }
 
 void Robot::start()
@@ -38,16 +38,9 @@ void Robot::start()
 
 void Robot::controlLoop()
 {
-    float pwm = 0;
     while (true)
     {   
-        uint64_t next = Kernel::get_ms_count() + 10;
-        // if(pwm > 1.0)
-        // {
-        //     pwm = 0.0;
-        // }
-        // led_ptr_->write(pwm);
-        // pwm += 0.01;
+        uint64_t next = Kernel::get_ms_count() + sample_time_;
         updatePid();
         ThisThread::sleep_until(next);
     }
@@ -65,9 +58,16 @@ void Robot::updatePid()
     int32_t dl_ticks = l_ticks - state_.l_ticks;
     int32_t dr_ticks = r_ticks - state_.r_ticks;
 
+    // update odometry
+    updateOdometry(dl_ticks, dr_ticks);
+    //
+
     state_.l_speed = (2.0 * M_PI) * dl_ticks / (MOTOR_PPR * pid_rate_);
     state_.r_speed = (2.0 * M_PI) * dr_ticks / (MOTOR_PPR * pid_rate_);
     
+    odom_.v = (WHEEL_RADIUS / 2) * (state_.l_speed + state_.r_speed);
+    odom_.w = (WHEEL_RADIUS / WHEEL_SEPARATION) * (state_.r_speed - state_.l_speed);
+
     l_pid_.setProcessValue(state_.l_speed);
     r_pid_.setProcessValue(state_.r_speed);
     
@@ -81,15 +81,40 @@ void Robot::updatePid()
     state_.r_ticks = r_ticks;
 }
 
+void Robot::updateOdometry(int32_t dl_ticks, int32_t dr_ticks)
+{
+    float Dl = (2 * M_PI * WHEEL_RADIUS * dl_ticks) / MOTOR_PPR;
+    float Dr = (2 * M_PI * WHEEL_RADIUS * dr_ticks) / MOTOR_PPR;
+    float Dc = (Dl + Dr) / 2;
+
+    odom_.x_pos += Dc * cos(odom_.theta);
+    odom_.y_pos += Dc * sin(odom_.theta);
+    odom_.theta += (Dr - Dl) / WHEEL_SEPARATION;
+}
+
 void Robot::setWheels(float left_speed, float right_speed)
 {
     l_pid_.setSetPoint(left_speed);
     r_pid_.setSetPoint(right_speed);
 }
 
+void Robot::setUnicycle(float v, float w)
+{
+    //              m/s  rad/s  m                       m
+    float v_l = (2 * v - w * WHEEL_SEPARATION) / (2 * WHEEL_RADIUS);
+    float v_r = (2 * v + w * WHEEL_SEPARATION) / (2 * WHEEL_RADIUS);
+
+    setWheels(v_l, v_r);
+}
+
 RobotState Robot::readState()
 {
     return state_;
+}
+
+RobotOdometry Robot::readOdometry()
+{
+    return odom_;
 }
 
 void Robot::setPidTunings(float kp, float kd, float ki)

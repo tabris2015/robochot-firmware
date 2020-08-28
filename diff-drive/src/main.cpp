@@ -10,12 +10,15 @@
 #include <std_msgs/UInt16.h>
 #include <geometry_msgs/Vector3.h>      // for pid tunings
 #include <geometry_msgs/Twist.h>
-#include <sensor_msgs/JointState.h>     // for feedback
+#include <geometry_msgs/TwistStamped.h>
 #include <sensor_msgs/Imu.h>
+#include <nav_msgs/Odometry.h>
+#include <tf/tf.h>
+#include <tf/transform_broadcaster.h>
 #include "robot_drive.h"
 
 
-#define PUB_RATE 0.1
+#define PUB_RATE 0.04
 #define PID_RATE 0.01
 
 // DigitalOut myled(LED1);
@@ -26,35 +29,50 @@ PwmOut led(LED_PIN);
 Robot robot(1, 0, 0, PID_RATE, &led);
 
 // useful resources and timing
-Timer t;
+// Timer t.;
+volatile bool pub_flag = false;
 Ticker pub_ticker;
-
+Ticker odom_ticker;
 
 // ros stuff
 ros::NodeHandle nh;
 char * robot_id = "/robochot";
 // ros messages
-sensor_msgs::JointState robot_state_msg;
 sensor_msgs::Imu imu_msg;
+nav_msgs::Odometry odom_msg;
+geometry_msgs::TransformStamped t;
+geometry_msgs::TwistStamped odom_twist;
+
 
 char *names[] = {"L", "R"};
 double pos[2];
 double vel[2];
 double eff[2];
+//
+char base_link_id[] = "/base_link";
+char odom_id[] = "/odom";
 // prototypes
 void messageCb(const std_msgs::UInt16 &brightness_msg);
 void wheelsCb(const geometry_msgs::Vector3 &wheels_msg);
 void pidTuningsCb(const geometry_msgs::Vector3 &pid_tunings_msg);
 void twistCb(const geometry_msgs::Twist &twist_msg);
-void pubCb(void);
+void odomCb(void);
+void pubOdom(void);
+//
+void initMsg();
 // -----------------------------------------------
+
+// tf
+tf::TransformBroadcaster broadcaster;
+//
 
 ros::Subscriber<std_msgs::UInt16> led_sub("led_brightness", &messageCb);
 ros::Subscriber<geometry_msgs::Vector3> wheels_sub("wheels", &wheelsCb);
 ros::Subscriber<geometry_msgs::Vector3> pid_tunings_sub("pid_tunings", &pidTuningsCb);
+ros::Subscriber<geometry_msgs::Twist> twist_sub("cmd_vel", &twistCb);
 
-ros::Publisher robot_state_pub("robot_state", &robot_state_msg);
 ros::Publisher imu_pub("robot_imu", &imu_msg);
+ros::Publisher twist_pub("odom_twist", &odom_twist);
 
 int main()
 {
@@ -67,27 +85,38 @@ int main()
     //     }
     // imu.setmode(OPERATION_MODE_NDOF);   // fusion mode
     // ros stuff
-    robot.start();
     nh.initNode();
-    // nh.subscribe(led_sub);
+    nh.subscribe(led_sub);
     nh.subscribe(pid_tunings_sub);
     nh.subscribe(wheels_sub);
-    nh.advertise(robot_state_pub);
+    nh.subscribe(twist_sub);
+    nh.advertise(twist_pub);
+    broadcaster.init(nh);
+
+    initMsg();
     // nh.advertise(imu_pub);
     
-    robot_state_msg.header.frame_id = robot_id;
-    robot_state_msg.name_length = 2;
-    robot_state_msg.position_length = 2;
-    robot_state_msg.velocity_length = 2;
-    robot_state_msg.effort_length = 2;
-    robot_state_msg.name = names;
-    //setup
-    pub_ticker.attach(pubCb, PUB_RATE);
     
+    //setup
+    odom_ticker.attach(odomCb,PUB_RATE);
+    robot.start();
     while (1)
     {
+        if(pub_flag)
+        {
+            pubOdom();
+            pub_flag = false;
+        }
         nh.spinOnce();
     }
+}
+
+void initMsg()
+{
+    // tf
+    t.header.frame_id = odom_id;
+    t.child_frame_id = base_link_id;
+    odom_twist.header.frame_id = base_link_id;
 }
 
 void messageCb(const std_msgs::UInt16 &brightness_msg)
@@ -99,22 +128,34 @@ void pidTuningsCb(const geometry_msgs::Vector3 &pid_msg)
 {
     robot.setPidTunings(pid_msg.x, pid_msg.y, pid_msg.z);
 }
-void pubCb()
-{
-    // extract state from robot class
-    RobotState state = robot.readState();
-    pos[0] = state.l_position;
-    pos[1] = state.r_position;
-    vel[0] = state.l_speed;
-    vel[1] = state.r_speed;
-    eff[0] = state.l_effort;
-    eff[1] = state.r_effort;
 
-    robot_state_msg.position = pos;
-    robot_state_msg.velocity = vel;
-    robot_state_msg.effort = eff;
-    // publish the message
-    robot_state_pub.publish(&robot_state_msg);
+void odomCb()
+{
+    pub_flag = true;
+}
+
+void pubOdom()
+{
+    RobotOdometry odom = robot.readOdometry();
+    geometry_msgs::Quaternion odom_quat = tf::createQuaternionFromYaw(odom.theta);
+
+    ros::Time now = nh.now();
+    // transform
+    // t.header.frame_id = odom;
+    // t.child_frame_id = base_link;
+    t.header.stamp = now;
+    t.transform.translation.x = odom.x_pos;
+    t.transform.translation.y = odom.y_pos;
+    t.transform.translation.z = 0.0;
+    t.transform.rotation = odom_quat;
+
+    // odom twist
+    odom_twist.header.stamp = now;
+    odom_twist.twist.linear.x = odom.v;
+    odom_twist.twist.angular.z = odom.w;
+
+    broadcaster.sendTransform(t);
+    twist_pub.publish(&odom_twist);
 }
 
 void wheelsCb(const geometry_msgs::Vector3 &wheels_msg)
