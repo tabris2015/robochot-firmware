@@ -127,7 +127,7 @@ void pubOdom()
     t.header.stamp = now;
     t.transform.translation.x = odom.x_pos;
     t.transform.translation.y = odom.y_pos;
-    t.transform.translation.z = 0.0;
+    t.transform.translation.z = 0.04;
     t.transform.rotation = odom_quat;
 
     // odom twist
