@@ -9,7 +9,7 @@
 #include "PID.h"
 #include "config.h"
 
-#define PWM_PERIOD 0.0005
+#define PWM_PERIOD 0.00005
 #define L_MOTOR_MAX_SPEED 5.3       // rad/s
 #define L_MOTOR_MIN_SPEED -5.3       // rad/s
 #define R_MOTOR_MAX_SPEED 5.3       // rad/s
