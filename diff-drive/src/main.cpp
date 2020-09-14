@@ -16,6 +16,7 @@
 
 #define PUB_RATE 0.04
 #define PID_RATE 0.01
+#define MSG_TIMEOUT 1.0
 
 PwmOut led(LED_PIN);
 
@@ -24,7 +25,7 @@ PwmOut led(LED_PIN);
 Robot robot(4, 0.1, 0, PID_RATE, &led);
 
 // useful resources and timing
-// Timer t.;
+Timer inactive_timer;
 volatile bool pub_flag = false;
 Ticker pub_ticker;
 Ticker odom_ticker;
@@ -83,12 +84,19 @@ int main()
     //setup
     odom_ticker.attach(odomCb,PUB_RATE);
     robot.start();
+    inactive_timer.start();
     while (1)
     {
         if(pub_flag)
         {
             pubOdom();
             pub_flag = false;
+        }
+        if(inactive_timer.read() >= MSG_TIMEOUT)
+        {
+            robot.setWheels(0.0, 0.0);
+            inactive_timer.reset();
+            inactive_timer.stop();
         }
         nh.spinOnce();
     }
@@ -134,4 +142,5 @@ void pubOdom()
 void twistCb(const geometry_msgs::Twist &twist_msg)
 {
     robot.setUnicycle(twist_msg.linear.x, twist_msg.angular.z);
+    inactive_timer.start();
 }
