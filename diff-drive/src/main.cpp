@@ -142,5 +142,6 @@ void pubOdom()
 void twistCb(const geometry_msgs::Twist &twist_msg)
 {
     robot.setUnicycle(twist_msg.linear.x, twist_msg.angular.z);
+    inactive_timer.reset();
     inactive_timer.start();
 }
